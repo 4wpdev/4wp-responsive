@@ -1,0 +1,30 @@
+/* 4WP Responsive utility classes */
+@media (max-width: 599px) {
+}
+
+@media (min-width: 600px) and (max-width: 1023px) {
+}
+
+@media (min-width: 1024px) {
+}
+
+/* Visibility utilities */
+@media (max-width: 599px) {
+.has-4wp-hide-mobile{display:none !important;}
+}
+@media (min-width: 600px) and (max-width: 1023px) {
+.has-4wp-hide-tablet{display:none !important;}
+}
+@media (min-width: 1024px) {
+.has-4wp-hide-desktop{display:none !important;}
+}
+@media (min-width: 600px) {
+.has-4wp-show-mobile{display:none !important;}
+}
+@media (max-width: 599px), (min-width: 1024px) {
+.has-4wp-show-tablet{display:none !important;}
+}
+@media (max-width: 1023px) {
+.has-4wp-show-desktop{display:none !important;}
+}
+
