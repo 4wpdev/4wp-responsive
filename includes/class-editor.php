@@ -56,19 +56,23 @@ class Editor {
 			);
 		}
 
-		// Step 2.4: Hide numeric input fields inside our responsive panel (slider-only UI).
+		// Step 2.4: Dotted slider by default; show number + unit when user clicks customization.
 		wp_register_style( 'forwp-responsive-editor-ui', false, [], FORWP_RESPONSIVE_VERSION );
 		wp_enqueue_style( 'forwp-responsive-editor-ui' );
 		wp_add_inline_style(
 			'forwp-responsive-editor-ui',
-			'.forwp-responsive-panel .components-range-control__number,'
-			. '.forwp-responsive-panel .components-input-control__container,'
-			. '.forwp-responsive-panel input[type="number"]{display:none !important;}'
-			. '.forwp-responsive-panel .components-unit-control,'
-			. '.forwp-responsive-panel .components-unit-control__select,'
-			. '.forwp-responsive-panel .components-unit-control__button{display:none !important;}'
-			. '.forwp-responsive-panel .components-range-control__wrapper{grid-template-columns:1fr !important;}'
+			/* Default: single column for slider; custom input visible when component toggles it */
+			'.forwp-responsive-panel .components-range-control__wrapper{grid-template-columns:1fr !important;}'
 			. '.forwp-responsive-panel .components-range-control__slider{margin:0 !important;}'
+			/* Dotted (dashed) slider track by default */
+			. '.forwp-responsive-panel .components-range-control__slider::-webkit-slider-runnable-track,'
+			. '.forwp-responsive-panel .spacing-sizes-control__custom-value-range::-webkit-slider-runnable-track{'
+			. 'height:6px;border-radius:3px;'
+			. 'background:repeating-linear-gradient(90deg,#c3c4c7 0,#c3c4c7 4px,transparent 4px,transparent 8px) !important;}'
+			. '.forwp-responsive-panel .components-range-control__slider::-moz-range-track,'
+			. '.forwp-responsive-panel .spacing-sizes-control__custom-value-range::-moz-range-track{'
+			. 'height:6px;border-radius:3px;'
+			. 'background:repeating-linear-gradient(90deg,#c3c4c7 0,#c3c4c7 4px,transparent 4px,transparent 8px) !important;}'
 		);
 	}
 }

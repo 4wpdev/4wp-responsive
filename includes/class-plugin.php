@@ -466,13 +466,14 @@ class Plugin {
 
 		// Step 7.2: Generate a hash based on the data that affects the stylesheet.
 		$hash_data = [
-			'breakpoints' => self::get_breakpoints(),
-			'sizes'       => self::get_spacing_sizes(),
-			'fallback'    => self::uses_fallback_spacing_sizes(),
-			'fontSizes'   => self::get_font_sizes(),
-			'fontFallback' => self::uses_fallback_font_sizes(),
-			'prefix'      => 'forwp',
-			'cssVersion'  => defined( 'FORWP_RESPONSIVE_VERSION' ) ? FORWP_RESPONSIVE_VERSION : 'dev',
+			'breakpoints'   => self::get_breakpoints(),
+			'sizes'         => self::get_spacing_sizes(),
+			'fallback'      => self::uses_fallback_spacing_sizes(),
+			'fontSizes'     => self::get_font_sizes(),
+			'fontFallback'  => self::uses_fallback_font_sizes(),
+			'prefix'        => 'forwp',
+			'cssVersion'    => defined( 'FORWP_RESPONSIVE_VERSION' ) ? FORWP_RESPONSIVE_VERSION : 'dev',
+			'cssTemplate'   => 8, // Bump when typography/spacing/layout logic changes to force regeneration.
 		];
 		$hash      = md5( wp_json_encode( $hash_data ) );
 		$filename  = 'forwp-responsive-' . $hash . '.css';
@@ -546,6 +547,9 @@ class Plugin {
 
 		// Step 8.4: Append visibility utilities for show/hide per device.
 		$css .= self::build_visibility_rules( $breakpoints );
+
+		// Step 8.4.1: Append reverse order (flex column-reverse) per device for Columns/Group.
+		$css .= self::build_reverse_order_rules( $breakpoints );
 
 		// Step 8.5: Append typography utilities for font-size per device.
 		$css .= self::build_typography_rules( self::get_font_sizes(), $breakpoints );
@@ -717,6 +721,73 @@ class Plugin {
 	}
 
 	/**
+	 * Step 9.2.3: Build reverse order rules (flex column-reverse) per breakpoint for Columns/Group.
+	 * On the given viewport, children display in reverse order (e.g. Column 2 | Column 1 on mobile).
+	 * Use higher specificity (.wp-block-columns, .wp-block-group) to override core layout (e.g. flex-wrap: nowrap).
+	 *
+	 * @param array $breakpoints Breakpoint settings.
+	 * @return string
+	 */
+	private static function build_reverse_order_rules( $breakpoints ) {
+		$mobile_max  = absint( $breakpoints['mobile']['max'] ?? 599 );
+		$tablet_min  = absint( $breakpoints['tablet']['min'] ?? 600 );
+		$tablet_max  = absint( $breakpoints['tablet']['max'] ?? 1023 );
+		$desktop_min = absint( $breakpoints['desktop']['min'] ?? 1024 );
+
+		$media_queries = [
+			'mobile'  => '(max-width: ' . $mobile_max . 'px)',
+			'tablet'  => '(min-width: ' . $tablet_min . 'px) and (max-width: ' . $tablet_max . 'px)',
+			'desktop' => '(min-width: ' . $desktop_min . 'px)',
+		];
+
+		// Core block layout uses .wp-container-* with flex-wrap: nowrap; we must override with higher specificity.
+		$block_selectors = [
+			'.wp-block-columns.has-forwp-reverse-',
+			'.wp-block-group.has-forwp-reverse-',
+			'.is-layout-flex.has-forwp-reverse-',
+		];
+
+		$css = "/* Reverse order (Columns/Group) */\n";
+		foreach ( $media_queries as $device => $query ) {
+			$preview_prefixes = self::get_preview_prefixes( $device );
+			$base_selectors   = array_merge(
+				[ '.has-forwp-reverse-' . $device ],
+				array_map( function ( $s ) use ( $device ) {
+					return $s . $device;
+				}, $block_selectors )
+			);
+			$selectors = array_merge( $base_selectors, self::prefix_selectors( '.has-forwp-reverse-' . $device, $preview_prefixes ) );
+			$rule      = implode( ',', $selectors ) . '{ flex-direction:column-reverse !important; flex-wrap:wrap !important; }';
+			$css      .= '@media ' . $query . " {\n" . $rule . "\n}\n";
+			// Step 9.2.3.1: Core Columns stack at 781px; apply reverse there too so front matches editor when "Stack on mobile" is on.
+			if ( 'mobile' === $device ) {
+				$css .= '@media (max-width: 781px) { ' . implode( ',', array_merge(
+					[ '.has-forwp-reverse-mobile' ],
+					array_map( function ( $s ) {
+						return $s . 'mobile';
+					}, $block_selectors )
+				) ) . '{ flex-direction:column-reverse !important; flex-wrap:wrap !important; } }' . "\n";
+			}
+		}
+
+		// Editor preview: apply reverse when in matching device preview (no media query).
+		foreach ( [ 'mobile', 'tablet', 'desktop' ] as $device ) {
+			$preview_prefixes = self::get_preview_prefixes( $device );
+			$selectors        = self::prefix_selectors( '.has-forwp-reverse-' . $device, $preview_prefixes );
+			foreach ( $block_selectors as $block_sel ) {
+				$full_sel = $block_sel . $device;
+				foreach ( $preview_prefixes as $prefix ) {
+					$selectors[] = $prefix . $full_sel;
+				}
+			}
+			$css .= implode( ',', $selectors ) . '{ flex-direction:column-reverse !important; flex-wrap:wrap !important; }' . "\n";
+		}
+		$css .= "\n";
+
+		return $css;
+	}
+
+	/**
 	 * Step 9.3: Build typography rules for font sizes per breakpoint.
 	 *
 	 * @param array $font_sizes Font size presets.
@@ -742,7 +813,7 @@ class Plugin {
 			$css .= '@media ' . $query . " {\n";
 			$selector = '.has-forwp-font-size-' . $device . '-custom';
 			$selectors = array_merge( [ $selector ], self::prefix_selectors( $selector, $preview_prefixes ) );
-			$css .= implode( ',', $selectors ) . '{ font-size:var(--forwp-font-size-' . $device . '); }' . "\n";
+			$css .= implode( ',', $selectors ) . '{ font-size:var(--forwp-font-size-' . $device . ') !important; }' . "\n";
 			foreach ( $font_sizes as $size ) {
 				if ( empty( $size['slug'] ) ) {
 					continue;
@@ -750,7 +821,15 @@ class Plugin {
 				$slug = $size['slug'];
 				$selector = '.has-forwp-font-size-' . $device . '-' . $slug;
 				$selectors = array_merge( [ $selector ], self::prefix_selectors( $selector, $preview_prefixes ) );
-				$css .= implode( ',', $selectors ) . '{ font-size:var(--wp--preset--font-size--' . $slug . '); }' . "\n";
+				$css .= implode( ',', $selectors ) . '{ font-size:var(--wp--preset--font-size--' . $slug . ') !important; }' . "\n";
+			}
+			// Prevent mobile/tablet-only font-size from affecting larger viewports: reset when no desktop value is set.
+			if ( 'desktop' === $device ) {
+				$reset_selector = '.has-forwp-font-size-mobile-custom:not([class*="has-forwp-font-size-desktop"]),.has-forwp-font-size-tablet-custom:not([class*="has-forwp-font-size-desktop"])';
+				$css .= $reset_selector . '{ font-size:unset; }' . "\n";
+			} elseif ( 'tablet' === $device ) {
+				$reset_selector = '.has-forwp-font-size-mobile-custom:not([class*="has-forwp-font-size-tablet"]):not([class*="has-forwp-font-size-desktop"])';
+				$css .= $reset_selector . '{ font-size:unset; }' . "\n";
 			}
 			$css .= "}\n";
 		}
@@ -771,10 +850,10 @@ class Plugin {
 		foreach ( $devices as $device ) {
 			$preview_prefixes = self::get_preview_prefixes( $device );
 
-			// Custom value selector.
+			// Custom value selector ( !important so it overrides block inline font-size and theme rules ).
 			$selector  = '.has-forwp-font-size-' . $device . '-custom';
 			$selectors = self::prefix_selectors( $selector, $preview_prefixes );
-			$css      .= implode( ',', $selectors ) . '{ font-size:var(--forwp-font-size-' . $device . '); }' . "\n";
+			$css      .= implode( ',', $selectors ) . '{ font-size:var(--forwp-font-size-' . $device . ') !important; }' . "\n";
 
 			foreach ( $font_sizes as $size ) {
 				if ( empty( $size['slug'] ) ) {
@@ -783,7 +862,7 @@ class Plugin {
 				$slug      = $size['slug'];
 				$selector  = '.has-forwp-font-size-' . $device . '-' . $slug;
 				$selectors = self::prefix_selectors( $selector, $preview_prefixes );
-				$css      .= implode( ',', $selectors ) . '{ font-size:var(--wp--preset--font-size--' . $slug . '); }' . "\n";
+				$css      .= implode( ',', $selectors ) . '{ font-size:var(--wp--preset--font-size--' . $slug . ') !important; }' . "\n";
 			}
 		}
 
@@ -808,25 +887,50 @@ class Plugin {
 			'desktop' => '(min-width: ' . $desktop_min . 'px)',
 		];
 
+		// Block-level alignment (margin) so Image and other blocks actually move; text-align for text.
+		$block_align = [
+			'left'    => 'text-align:left !important; display:block !important; margin-right:auto !important; margin-left:0 !important;',
+			'center'  => 'text-align:center !important; display:block !important; margin-left:auto !important; margin-right:auto !important;',
+			'right'   => 'text-align:right !important; display:block !important; margin-left:auto !important; margin-right:0 !important;',
+			'justify' => 'text-align:justify !important;',
+		];
+
 		$css = "/* Text alignment utilities */\n";
 		foreach ( $media_queries as $device => $query ) {
 			$css .= '@media ' . $query . " {\n";
 			foreach ( self::$text_align_values as $align ) {
-				$css .= '.has-forwp-text-align-' . $device . '-' . $align . '{ text-align:' . $align . ' !important; }' . "\n";
-				$css .= '.has-forwp-text-align-' . $device . '-' . $align . ' > *{ text-align:inherit !important; }' . "\n";
+				$decl = $block_align[ $align ];
+				$sel  = '.has-forwp-text-align-' . $device . '-' . $align;
+				$css .= $sel . '{ ' . $decl . ' }' . "\n";
+				$css .= $sel . ' > *{ text-align:inherit !important; }' . "\n";
+				// Higher specificity for core blocks so alignment wins over theme.
+				$css .= '.wp-block-image' . $sel . ',.wp-block-heading' . $sel . ',figure' . $sel . ',.wp-block-column' . $sel . '{ ' . $decl . ' }' . "\n";
+				// When any block inside a column has alignment, apply to whole column (so sibling blocks align too).
+				$css .= '.wp-block-column:has(' . $sel . '){ ' . $decl . ' }' . "\n";
 			}
 			$css .= "}\n";
 		}
 
 		// Step 9.6.1: Add editor preview selectors without media queries.
+		$block_align_selectors = [ '.wp-block-image', '.wp-block-heading', 'figure', '.wp-block-column' ];
 		foreach ( [ 'mobile', 'tablet', 'desktop' ] as $device ) {
 			$preview_prefixes = self::get_preview_prefixes( $device );
 			foreach ( self::$text_align_values as $align ) {
-				$selector  = '.has-forwp-text-align-' . $device . '-' . $align;
+				$decl     = $block_align[ $align ];
+				$selector = '.has-forwp-text-align-' . $device . '-' . $align;
 				$selectors = self::prefix_selectors( $selector, $preview_prefixes );
-				$css      .= implode( ',', $selectors ) . '{ text-align:' . $align . ' !important; }' . "\n";
+				$css      .= implode( ',', $selectors ) . '{ ' . $decl . ' }' . "\n";
 				$child_selectors = self::prefix_selectors( $selector . ' > *', $preview_prefixes );
 				$css      .= implode( ',', $child_selectors ) . '{ text-align:inherit !important; }' . "\n";
+				foreach ( $block_align_selectors as $block_sel ) {
+					$block_full = $block_sel . $selector;
+					$prefixed   = self::prefix_selectors( $block_full, $preview_prefixes );
+					$css       .= implode( ',', $prefixed ) . '{ ' . $decl . ' }' . "\n";
+				}
+				// Column: when any child has alignment, apply to column (editor preview).
+				$col_has = '.wp-block-column:has(' . $selector . ')';
+				$col_prefixed = self::prefix_selectors( $col_has, $preview_prefixes );
+				$css .= implode( ',', $col_prefixed ) . '{ ' . $decl . ' }' . "\n";
 			}
 		}
 

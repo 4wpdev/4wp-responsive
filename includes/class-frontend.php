@@ -61,7 +61,7 @@ class Frontend {
 		$style_string = ! empty( $result['styles'] ) ? self::build_style_attribute( $result['styles'] ) : '';
 
 		return preg_replace_callback(
-			'/<([a-z]+)([^>]*)>/i',
+			'/<([a-z][a-z0-9]*)([^>]*)>/i',
 			static function ( $matches ) use ( $class_string, $style_string ) {
 				$tag_name  = $matches[1];
 				$tag_attrs = $matches[2];
@@ -203,6 +203,18 @@ class Frontend {
 		];
 
 		foreach ( $visibility_map as $attr_key => $class_name ) {
+			if ( ! empty( $attributes[ $attr_key ] ) ) {
+				$classes[] = $class_name;
+			}
+		}
+
+		// Step 4.3.1: Reverse order (flex column-reverse) per device for Columns/Group.
+		$reverse_map = [
+			'responsiveReverseMobile'  => 'has-forwp-reverse-mobile',
+			'responsiveReverseTablet'   => 'has-forwp-reverse-tablet',
+			'responsiveReverseDesktop' => 'has-forwp-reverse-desktop',
+		];
+		foreach ( $reverse_map as $attr_key => $class_name ) {
 			if ( ! empty( $attributes[ $attr_key ] ) ) {
 				$classes[] = $class_name;
 			}

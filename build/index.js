@@ -208,6 +208,14 @@
 			}
 		});
 
+		// Step 5.4: Add reverse order (flex direction) per breakpoint for Columns/Group.
+		['Mobile', 'Tablet', 'Desktop'].forEach(function (device) {
+			var reverseKey = 'responsiveReverse' + device;
+			if (!settings.attributes[reverseKey]) {
+				settings.attributes[reverseKey] = { type: 'boolean', default: false };
+			}
+		});
+
 		return settings;
 	});
 
@@ -311,6 +319,9 @@
 			if (attributes.responsiveShowMobile) classes.push('has-forwp-show-mobile');
 			if (attributes.responsiveShowTablet) classes.push('has-forwp-show-tablet');
 			if (attributes.responsiveShowDesktop) classes.push('has-forwp-show-desktop');
+			if (attributes.responsiveReverseMobile) classes.push('has-forwp-reverse-mobile');
+			if (attributes.responsiveReverseTablet) classes.push('has-forwp-reverse-tablet');
+			if (attributes.responsiveReverseDesktop) classes.push('has-forwp-reverse-desktop');
 		}
 
 		return {
@@ -501,6 +512,26 @@
 				);
 			}
 
+			// Step 7.4: Render reverse order toggle per device (Columns/Group: Column 2 | Column 1 on mobile).
+			function renderReverseOrderGroup(deviceKey) {
+				var reverseKey = 'responsiveReverse' + deviceKey;
+				return el(
+					'div',
+					{ className: '4wp-responsive-group' },
+					el('p', { className: '4wp-responsive-group-title' }, __('Layout', '4wp-responsive')),
+					el(ToggleControl, {
+						label: __('Reverse order on this device', '4wp-responsive'),
+						help: __('Use for Columns/Group: show right column above left when stacked (e.g. on mobile).', '4wp-responsive'),
+						checked: !!props.attributes[reverseKey],
+						onChange: function (value) {
+							var update = {};
+							update[reverseKey] = value;
+							props.setAttributes(update);
+						}
+					})
+				);
+			}
+
 			// Step 7.1: Render visibility controls per device.
 			function renderVisibilityGroup(deviceKey) {
 				var hideKey = 'responsiveHide' + deviceKey;
@@ -580,6 +611,8 @@
 									renderFontSizeGroup(device.key),
 									renderDivider(),
 									renderTextAlignGroup(device.key),
+									renderDivider(),
+									renderReverseOrderGroup(device.key),
 									renderDivider(),
 									renderVisibilityGroup(device.key)
 								);
