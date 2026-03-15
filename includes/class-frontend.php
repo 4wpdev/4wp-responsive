@@ -31,12 +31,7 @@ class Frontend {
 				filemtime( $css_asset['path'] )
 			);
 		}
-
-		// Step 2.2: Inject a frontend-only fix to guarantee hide rules apply.
-		$hide_fix = '.has-forwp-hide-mobile,.has-forwp-hide-tablet,.has-forwp-hide-desktop{display:none !important;}';
-		if ( ! is_admin() ) {
-			wp_add_inline_style( 'forwp-responsive-utilities', $hide_fix );
-		}
+		// Hide/show rules are in the generated CSS with correct media queries (mobile/tablet/desktop). Do not add a global display:none here.
 	}
 
 	/**
@@ -56,44 +51,58 @@ class Frontend {
 			return $block_content;
 		}
 
-		// Step 3.1: Inject utility classes into the first block wrapper element.
+		// Step 3.1: Inject utility classes into the block root (first tag with wp-block-* or first block-level tag).
 		$class_string = ! empty( $result['classes'] ) ? implode( ' ', $result['classes'] ) : '';
 		$style_string = ! empty( $result['styles'] ) ? self::build_style_attribute( $result['styles'] ) : '';
 
-		return preg_replace_callback(
-			'/<([a-z][a-z0-9]*)([^>]*)>/i',
-			static function ( $matches ) use ( $class_string, $style_string ) {
-				$tag_name  = $matches[1];
-				$tag_attrs = $matches[2];
-
-				if ( $class_string && preg_match( '/class=["\']([^"\']*)["\']/i', $tag_attrs, $class_matches ) ) {
-					$existing_classes = $class_matches[1];
-					$new_classes      = trim( $existing_classes . ' ' . $class_string );
-					$tag_attrs        = preg_replace(
-						'/class=["\']' . preg_quote( $existing_classes, '/' ) . '["\']/i',
-						'class="' . esc_attr( $new_classes ) . '"',
+		$inject = static function ( $matches ) use ( $class_string, $style_string, $result ) {
+			$tag_name  = $matches[1];
+			$tag_attrs = $matches[2];
+			// Skip script, style, template.
+			if ( in_array( strtolower( $tag_name ), [ 'script', 'style', 'template' ], true ) ) {
+				return $matches[0];
+			}
+			if ( $class_string && preg_match( '/class=["\']([^"\']*)["\']/i', $tag_attrs, $class_matches ) ) {
+				$existing_classes = $class_matches[1];
+				$new_classes      = trim( $existing_classes . ' ' . $class_string );
+				$tag_attrs        = preg_replace(
+					'/class=["\']' . preg_quote( $existing_classes, '/' ) . '["\']/i',
+					'class="' . esc_attr( $new_classes ) . '"',
+					$tag_attrs
+				);
+			} elseif ( $class_string ) {
+				$tag_attrs = ( '' !== trim( $tag_attrs ) ? $tag_attrs . ' ' : '' ) . 'class="' . esc_attr( $class_string ) . '"';
+			}
+			if ( $style_string ) {
+				if ( preg_match( '/style=["\']([^"\']*)["\']/i', $tag_attrs, $style_matches ) ) {
+					$existing_style = trim( $style_matches[1] );
+					// Remove default padding/margin from inline style so our responsive rules (with !important) are not overridden by concatenation.
+					$existing_style = self::strip_responsive_overridden_properties( $existing_style, $result );
+					$merged_style   = trim( ( $existing_style ? $existing_style . '; ' : '' ) . $style_string );
+					$tag_attrs      = preg_replace(
+						'/style=["\']' . preg_quote( $style_matches[1], '/' ) . '["\']/i',
+						'style="' . esc_attr( $merged_style ) . '"',
 						$tag_attrs
 					);
-				} elseif ( $class_string ) {
-					$tag_attrs = ( '' !== trim( $tag_attrs ) ? $tag_attrs . ' ' : '' ) . 'class="' . esc_attr( $class_string ) . '"';
+				} else {
+					$tag_attrs = ( '' !== trim( $tag_attrs ) ? $tag_attrs . ' ' : '' ) . 'style="' . esc_attr( $style_string ) . '"';
 				}
+			}
+			return '<' . $tag_name . ( '' !== trim( $tag_attrs ) ? ' ' . trim( $tag_attrs ) : '' ) . '>';
+		};
 
-				if ( $style_string ) {
-					if ( preg_match( '/style=["\']([^"\']*)["\']/i', $tag_attrs, $style_matches ) ) {
-						$existing_style = trim( $style_matches[1] );
-						$merged_style   = trim( $existing_style . ' ' . $style_string );
-						$tag_attrs      = preg_replace(
-							'/style=["\']' . preg_quote( $existing_style, '/' ) . '["\']/i',
-							'style="' . esc_attr( $merged_style ) . '"',
-							$tag_attrs
-						);
-					} else {
-						$tag_attrs = ( '' !== trim( $tag_attrs ) ? $tag_attrs . ' ' : '' ) . 'style="' . esc_attr( $style_string ) . '"';
-					}
-				}
-
-				return '<' . $tag_name . ( '' !== trim( $tag_attrs ) ? ' ' . trim( $tag_attrs ) : '' ) . '>';
-			},
+		// Prefer first tag that has wp-block- in class (block root); otherwise first block-level tag.
+		if ( preg_match( '/<([a-z][a-z0-9]*)([^>]*class=["\'][^"\']*wp-block-[^"\']*["\'][^>]*)>/i', $block_content, $m ) ) {
+			return preg_replace_callback(
+				'/<([a-z][a-z0-9]*)([^>]*class=["\'][^"\']*wp-block-[^"\']*["\'][^>]*)>/i',
+				$inject,
+				$block_content,
+				1
+			);
+		}
+		return preg_replace_callback(
+			'/<([a-z][a-z0-9]*)([^>]*)>/i',
+			$inject,
 			$block_content,
 			1
 		);
@@ -220,10 +229,87 @@ class Frontend {
 			}
 		}
 
+		// Step 4.5a: Responsive border radius per corner (top-left, top-right, bottom-right, bottom-left).
+		$radius_corners = [
+			'TopLeft'     => 'top-left',
+			'TopRight'    => 'top-right',
+			'BottomRight' => 'bottom-right',
+			'BottomLeft'  => 'bottom-left',
+		];
+		foreach ( $devices as $device_key => $device_slug ) {
+			foreach ( $radius_corners as $corner_key => $corner_slug ) {
+				$attr_key = 'responsiveBorderRadius' . $corner_key . $device_key;
+				if ( empty( $attributes[ $attr_key ] ) ) {
+					continue;
+				}
+				$raw_value = trim( (string) $attributes[ $attr_key ] );
+				if ( '' === $raw_value ) {
+					continue;
+				}
+				$classes[] = 'has-forwp-border-radius-' . $corner_slug . '-' . $device_slug;
+				$styles[]  = '--forwp-border-radius-' . $corner_slug . '-' . $device_slug . ':' . self::sanitize_length_value( $raw_value );
+			}
+		}
+
+		// Step 4.5b: Responsive min height (Cover, Group, etc.).
+		foreach ( $devices as $device_key => $device_slug ) {
+			$attr_key = 'responsiveMinHeight' . $device_key;
+			if ( empty( $attributes[ $attr_key ] ) ) {
+				continue;
+			}
+			$raw_value = trim( (string) $attributes[ $attr_key ] );
+			if ( '' === $raw_value ) {
+				continue;
+			}
+			$classes[] = 'has-forwp-min-height-' . $device_slug;
+			$styles[]  = '--forwp-min-height-' . $device_slug . ':' . self::sanitize_length_value( $raw_value );
+		}
+
 		return [
 			'classes' => $classes,
 			'styles'  => $styles,
 		];
+	}
+
+	/**
+	 * Remove padding/margin from inline style when we override them via responsive classes/vars,
+	 * so default block padding (e.g. 160px) does not stay in the attribute and override our rules.
+	 *
+	 * @param string $existing_style Inline style string.
+	 * @param array  $result        Result from get_responsive_classes_and_styles (classes, styles).
+	 * @return string Filtered style string.
+	 */
+	private static function strip_responsive_overridden_properties( $existing_style, $result ) {
+		$classes = isset( $result['classes'] ) ? implode( ' ', $result['classes'] ) : '';
+		$styles  = isset( $result['styles'] ) ? implode( ' ', $result['styles'] ) : '';
+		$props    = [ 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left' ];
+		if ( strpos( $classes, 'has-forwp-min-height-' ) !== false || strpos( $styles, '--forwp-min-height-' ) !== false ) {
+			$props[] = 'min-height';
+		}
+		$to_strip = [];
+		foreach ( $props as $prop ) {
+			if ( strpos( $classes, 'has-forwp-' . $prop . '-' ) !== false ) {
+				$to_strip[] = $prop;
+				continue;
+			}
+			if ( strpos( $styles, '--forwp-' . $prop . '-' ) !== false ) {
+				$to_strip[] = $prop;
+			}
+		}
+		// Strip per-corner border radius when we have any responsive border radius override.
+		if ( strpos( $classes, 'has-forwp-border-radius-' ) !== false || strpos( $styles, '--forwp-border-radius-' ) !== false ) {
+			$to_strip[] = 'border-top-left-radius';
+			$to_strip[] = 'border-top-right-radius';
+			$to_strip[] = 'border-bottom-right-radius';
+			$to_strip[] = 'border-bottom-left-radius';
+		}
+		if ( empty( $to_strip ) ) {
+			return $existing_style;
+		}
+		foreach ( $to_strip as $prop ) {
+			$existing_style = preg_replace( '/\s*' . preg_quote( $prop, '/' ) . '\s*:\s*[^;]+;?\s*/i', ' ', $existing_style );
+		}
+		return trim( preg_replace( '/\s+/', ' ', $existing_style ), " \t\n\r;" );
 	}
 
 	/**
@@ -264,6 +350,16 @@ class Frontend {
 		}
 
 		return '';
+	}
+
+	/**
+	 * Sanitize length value for border-radius and min-height (same rules as spacing).
+	 *
+	 * @param string $value Raw value.
+	 * @return string
+	 */
+	private static function sanitize_length_value( $value ) {
+		return self::sanitize_custom_value( $value );
 	}
 }
 

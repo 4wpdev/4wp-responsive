@@ -110,6 +110,22 @@ class Plugin {
 			];
 		}
 
+		// Step 2.5: Generate attribute definitions for responsive border radius.
+		foreach ( self::get_border_radius_attribute_keys() as $attribute_key ) {
+			$args['attributes'][ $attribute_key ] = [
+				'type'    => 'string',
+				'default' => '',
+			];
+		}
+
+		// Step 2.6: Generate attribute definitions for responsive min height.
+		foreach ( self::get_min_height_attribute_keys() as $attribute_key ) {
+			$args['attributes'][ $attribute_key ] = [
+				'type'    => 'string',
+				'default' => '',
+			];
+		}
+
 		return $args;
 	}
 
@@ -185,6 +201,37 @@ class Plugin {
 			$keys[] = 'responsiveTextAlign' . $device;
 		}
 
+		return $keys;
+	}
+
+	/**
+	 * Step 3.5: Build the list of responsive border radius attribute keys (per corner, per device).
+	 *
+	 * @return string[]
+	 */
+	public static function get_border_radius_attribute_keys() {
+		$corners = [ 'TopLeft', 'TopRight', 'BottomRight', 'BottomLeft' ];
+		$devices = [ 'Mobile', 'Tablet', 'Desktop' ];
+		$keys    = [];
+		foreach ( $corners as $corner ) {
+			foreach ( $devices as $device ) {
+				$keys[] = 'responsiveBorderRadius' . $corner . $device;
+			}
+		}
+		return $keys;
+	}
+
+	/**
+	 * Step 3.6: Build the list of responsive min height attribute keys.
+	 *
+	 * @return string[]
+	 */
+	public static function get_min_height_attribute_keys() {
+		$devices = [ 'Mobile', 'Tablet', 'Desktop' ];
+		$keys    = [];
+		foreach ( $devices as $device ) {
+			$keys[] = 'responsiveMinHeight' . $device;
+		}
 		return $keys;
 	}
 
@@ -473,7 +520,7 @@ class Plugin {
 			'fontFallback'  => self::uses_fallback_font_sizes(),
 			'prefix'        => 'forwp',
 			'cssVersion'    => defined( 'FORWP_RESPONSIVE_VERSION' ) ? FORWP_RESPONSIVE_VERSION : 'dev',
-			'cssTemplate'   => 8, // Bump when typography/spacing/layout logic changes to force regeneration.
+			'cssTemplate'   => 16, // Bump when typography/spacing/layout logic changes to force regeneration.
 		];
 		$hash      = md5( wp_json_encode( $hash_data ) );
 		$filename  = 'forwp-responsive-' . $hash . '.css';
@@ -539,6 +586,8 @@ class Plugin {
 		foreach ( $media_queries as $device => $query ) {
 			$css .= '@media ' . $query . " {\n";
 			$css .= self::build_spacing_rules( $device, $normalized_sizes );
+			$css .= self::build_border_radius_rules_for_device( $device );
+			$css .= self::build_min_height_rules_for_device( $device );
 			$css .= "}\n\n";
 		}
 
@@ -585,7 +634,7 @@ class Plugin {
 				$selector = '.has-forwp-' . $type . '-' . $side . '-' . $device . '-custom';
 				$selectors = array_merge( [ $selector ], self::prefix_selectors( $selector, $preview_prefixes ) );
 				$css .= sprintf(
-					'%1$s{ %2$s-%3$s:var(--forwp-%2$s-%3$s-%4$s); }' . "\n",
+					'%1$s{ %2$s-%3$s:var(--forwp-%2$s-%3$s-%4$s) !important; }' . "\n",
 					implode( ',', $selectors ),
 					$type,
 					$side,
@@ -606,7 +655,7 @@ class Plugin {
 					$selector = '.has-forwp-' . $type . '-' . $side . '-' . $device . '-' . $slug;
 					$selectors = array_merge( [ $selector ], self::prefix_selectors( $selector, $preview_prefixes ) );
 					$css .= sprintf(
-						'%1$s{ %2$s-%3$s:%4$s; }' . "\n",
+						'%1$s{ %2$s-%3$s:%4$s !important; }' . "\n",
 						implode( ',', $selectors ),
 						$type,
 						$side,
@@ -640,7 +689,7 @@ class Plugin {
 					// Custom value selector.
 					$selector  = '.has-forwp-' . $type . '-' . $side . '-' . $device . '-custom';
 					$selectors = self::prefix_selectors( $selector, $preview_prefixes );
-					$css      .= implode( ',', $selectors ) . '{ ' . $type . '-' . $side . ':var(--forwp-' . $type . '-' . $side . '-' . $device . '); }' . "\n";
+					$css      .= implode( ',', $selectors ) . '{ ' . $type . '-' . $side . ':var(--forwp-' . $type . '-' . $side . '-' . $device . ') !important; }' . "\n";
 
 					// Preset value selectors.
 					foreach ( $sizes as $size ) {
@@ -650,7 +699,7 @@ class Plugin {
 						$slug      = $size['slug'];
 						$selector  = '.has-forwp-' . $type . '-' . $side . '-' . $device . '-' . $slug;
 						$selectors = self::prefix_selectors( $selector, $preview_prefixes );
-						$css      .= implode( ',', $selectors ) . '{ ' . $type . '-' . $side . ':var(--wp--preset--spacing--' . $slug . '); }' . "\n";
+						$css      .= implode( ',', $selectors ) . '{ ' . $type . '-' . $side . ':var(--wp--preset--spacing--' . $slug . ') !important; }' . "\n";
 					}
 				}
 			}
@@ -692,12 +741,18 @@ class Plugin {
 		$css .= ".has-forwp-show-desktop{display:none !important;}\n";
 		$css .= "}\n\n";
 
-		// Step 9.2.1: In editor previews, dim instead of hiding blocks.
+		// Step 9.2.0: In the editor only: always show hidden blocks as semi-transparent (no dependency on device preview class).
+		// body.wp-admin + .block-editor so this wins after other CSS loads.
+		$css .= "body.wp-admin .editor-styles-wrapper .has-forwp-hide-mobile,body.wp-admin .editor-styles-wrapper .has-forwp-hide-tablet,body.wp-admin .editor-styles-wrapper .has-forwp-hide-desktop,"
+			. "body.wp-admin .block-editor-block-list__block.has-forwp-hide-mobile,body.wp-admin .block-editor-block-list__block.has-forwp-hide-tablet,body.wp-admin .block-editor-block-list__block.has-forwp-hide-desktop"
+			. "{display:revert !important;visibility:visible !important;opacity:0.35 !important;pointer-events:auto !important;}\n";
+
+		// Step 9.2.1: In editor previews, dim instead of hiding blocks (override display:none so blocks stay visible but dimmed).
 		foreach ( [ 'mobile', 'tablet', 'desktop' ] as $device ) {
 			$preview_prefixes = self::get_preview_prefixes( $device );
 			$selector = '.has-forwp-hide-' . $device;
 			$selectors = self::prefix_selectors( $selector, $preview_prefixes );
-			$css .= implode( ',', $selectors ) . '{opacity:0.35;}\n';
+			$css .= implode( ',', $selectors ) . '{display:revert !important;visibility:visible !important;opacity:0.35;}\n';
 		}
 
 		// Step 9.2.2: Dim "show only" blocks on non-matching preview devices.
@@ -711,7 +766,7 @@ class Plugin {
 			foreach ( $hidden_devices as $hidden_device ) {
 				$selector  = '.has-forwp-show-' . $hidden_device;
 				$selectors = self::prefix_selectors( $selector, $preview_prefixes );
-				$css      .= implode( ',', $selectors ) . '{opacity:0.35;}\n';
+				$css      .= implode( ',', $selectors ) . '{display:revert !important;visibility:visible !important;opacity:0.35;}\n';
 			}
 		}
 
@@ -741,11 +796,22 @@ class Plugin {
 		];
 
 		// Core block layout uses .wp-container-* with flex-wrap: nowrap; we must override with higher specificity.
+		// Inner container: Group/Row may have flex on .wp-block-group__inner-container or direct child.
 		$block_selectors = [
 			'.wp-block-columns.has-forwp-reverse-',
 			'.wp-block-group.has-forwp-reverse-',
 			'.is-layout-flex.has-forwp-reverse-',
 		];
+		$inner_selectors = [
+			'.has-forwp-reverse-%1$s > .wp-block-group__inner-container',
+			'.wp-block-group.has-forwp-reverse-%1$s > .wp-block-group__inner-container',
+			'.has-forwp-reverse-%1$s > .is-layout-flex',
+			'.wp-block-group.has-forwp-reverse-%1$s > .is-layout-flex',
+			'.has-forwp-reverse-%1$s > [class*="wp-container-"]',
+			'.wp-block-group.has-forwp-reverse-%1$s > [class*="wp-container-"]',
+		];
+
+		$decl = 'display:flex !important; flex-direction:column-reverse !important; flex-wrap:wrap !important;';
 
 		$css = "/* Reverse order (Columns/Group) */\n";
 		foreach ( $media_queries as $device => $query ) {
@@ -754,19 +820,26 @@ class Plugin {
 				[ '.has-forwp-reverse-' . $device ],
 				array_map( function ( $s ) use ( $device ) {
 					return $s . $device;
-				}, $block_selectors )
+				}, $block_selectors ),
+				array_map( function ( $tpl ) use ( $device ) {
+					return sprintf( $tpl, $device );
+				}, $inner_selectors )
 			);
 			$selectors = array_merge( $base_selectors, self::prefix_selectors( '.has-forwp-reverse-' . $device, $preview_prefixes ) );
-			$rule      = implode( ',', $selectors ) . '{ flex-direction:column-reverse !important; flex-wrap:wrap !important; }';
+			$rule      = implode( ',', $selectors ) . '{ ' . $decl . ' }';
 			$css      .= '@media ' . $query . " {\n" . $rule . "\n}\n";
 			// Step 9.2.3.1: Core Columns stack at 781px; apply reverse there too so front matches editor when "Stack on mobile" is on.
 			if ( 'mobile' === $device ) {
-				$css .= '@media (max-width: 781px) { ' . implode( ',', array_merge(
+				$mobile_sel = array_merge(
 					[ '.has-forwp-reverse-mobile' ],
 					array_map( function ( $s ) {
 						return $s . 'mobile';
-					}, $block_selectors )
-				) ) . '{ flex-direction:column-reverse !important; flex-wrap:wrap !important; } }' . "\n";
+					}, $block_selectors ),
+					array_map( function ( $tpl ) {
+						return sprintf( $tpl, 'mobile' );
+					}, $inner_selectors )
+				);
+				$css .= '@media (max-width: 781px) { ' . implode( ',', $mobile_sel ) . '{ ' . $decl . ' } }' . "\n";
 			}
 		}
 
@@ -780,7 +853,13 @@ class Plugin {
 					$selectors[] = $prefix . $full_sel;
 				}
 			}
-			$css .= implode( ',', $selectors ) . '{ flex-direction:column-reverse !important; flex-wrap:wrap !important; }' . "\n";
+			foreach ( $inner_selectors as $tpl ) {
+				$sel = sprintf( $tpl, $device );
+				foreach ( $preview_prefixes as $prefix ) {
+					$selectors[] = $prefix . $sel;
+				}
+			}
+			$css .= implode( ',', $selectors ) . '{ ' . $decl . ' }' . "\n";
 		}
 		$css .= "\n";
 
@@ -824,12 +903,13 @@ class Plugin {
 				$css .= implode( ',', $selectors ) . '{ font-size:var(--wp--preset--font-size--' . $slug . ') !important; }' . "\n";
 			}
 			// Prevent mobile/tablet-only font-size from affecting larger viewports: reset when no desktop value is set.
+			// Use !important so theme/block rules (e.g. h1 font-size) don't override; unset lets theme default apply.
 			if ( 'desktop' === $device ) {
 				$reset_selector = '.has-forwp-font-size-mobile-custom:not([class*="has-forwp-font-size-desktop"]),.has-forwp-font-size-tablet-custom:not([class*="has-forwp-font-size-desktop"])';
-				$css .= $reset_selector . '{ font-size:unset; }' . "\n";
+				$css .= $reset_selector . '{ font-size:unset !important; }' . "\n";
 			} elseif ( 'tablet' === $device ) {
 				$reset_selector = '.has-forwp-font-size-mobile-custom:not([class*="has-forwp-font-size-tablet"]):not([class*="has-forwp-font-size-desktop"])';
-				$css .= $reset_selector . '{ font-size:unset; }' . "\n";
+				$css .= $reset_selector . '{ font-size:unset !important; }' . "\n";
 			}
 			$css .= "}\n";
 		}
@@ -867,6 +947,39 @@ class Plugin {
 		}
 
 		return $css;
+	}
+
+	/**
+	 * Step 9.5a: Build border radius rules for a single device (per corner, used inside media query).
+	 *
+	 * @param string $device Device key (mobile, tablet, desktop).
+	 * @return string
+	 */
+	private static function build_border_radius_rules_for_device( $device ) {
+		$corners = [
+			'top-left'     => 'border-top-left-radius',
+			'top-right'    => 'border-top-right-radius',
+			'bottom-right' => 'border-bottom-right-radius',
+			'bottom-left'  => 'border-bottom-left-radius',
+		];
+		$css = '/* Border radius (per corner) */' . "\n";
+		foreach ( $corners as $slug => $prop ) {
+			$class = 'has-forwp-border-radius-' . $slug . '-' . $device;
+			$var   = '--forwp-border-radius-' . $slug . '-' . $device;
+			$css  .= '.' . $class . '{ ' . $prop . ': var(' . $var . ') !important; }' . "\n";
+		}
+		return $css;
+	}
+
+	/**
+	 * Step 9.5b: Build min height rules for a single device (used inside media query).
+	 *
+	 * @param string $device Device key (mobile, tablet, desktop).
+	 * @return string
+	 */
+	private static function build_min_height_rules_for_device( $device ) {
+		$class = 'has-forwp-min-height-' . $device;
+		return '/* Min height */' . "\n." . $class . '{ min-height: var(--forwp-min-height-' . $device . ') !important; }' . "\n";
 	}
 
 	/**

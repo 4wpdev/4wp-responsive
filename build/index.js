@@ -26,6 +26,7 @@
 	var PanelBody = window.wp.components.PanelBody;
 	var TabPanel = window.wp.components.TabPanel;
 	var SelectControl = window.wp.components.SelectControl;
+	var TextControl = window.wp.components.TextControl;
 	var ToggleControl = window.wp.components.ToggleControl;
 	var ButtonGroup = window.wp.components.ButtonGroup;
 	var Button = window.wp.components.Button;
@@ -216,6 +217,21 @@
 			}
 		});
 
+		// Step 5.5: Add border radius (per corner) and min height per breakpoint.
+		var radiusCorners = ['TopLeft', 'TopRight', 'BottomRight', 'BottomLeft'];
+		['Mobile', 'Tablet', 'Desktop'].forEach(function (device) {
+			radiusCorners.forEach(function (corner) {
+				var brKey = 'responsiveBorderRadius' + corner + device;
+				if (!settings.attributes[brKey]) {
+					settings.attributes[brKey] = { type: 'string', default: '' };
+				}
+			});
+			var mhKey = 'responsiveMinHeight' + device;
+			if (!settings.attributes[mhKey]) {
+				settings.attributes[mhKey] = { type: 'string', default: '' };
+			}
+		});
+
 		return settings;
 	});
 
@@ -324,6 +340,36 @@
 			if (attributes.responsiveReverseDesktop) classes.push('has-forwp-reverse-desktop');
 		}
 
+		// Step 6.5: Responsive border radius per corner (top-left, top-right, bottom-right, bottom-left).
+		var radiusCorners = [
+			{ key: 'TopLeft', slug: 'top-left' },
+			{ key: 'TopRight', slug: 'top-right' },
+			{ key: 'BottomRight', slug: 'bottom-right' },
+			{ key: 'BottomLeft', slug: 'bottom-left' }
+		];
+		['Mobile', 'Tablet', 'Desktop'].forEach(function (device) {
+			radiusCorners.forEach(function (c) {
+				var key = 'responsiveBorderRadius' + c.key + device;
+				var value = attributes && attributes[key] ? String(attributes[key]).trim() : '';
+				if (!value) return;
+				var deviceSlug = device.toLowerCase();
+				classes.push('has-forwp-border-radius-' + c.slug + '-' + deviceSlug);
+				var sanitized = /^-?\d*\.?\d+$/.test(value) ? value + 'px' : value;
+				styles['--forwp-border-radius-' + c.slug + '-' + deviceSlug] = sanitized;
+			});
+		});
+
+		// Step 6.6: Responsive min height (Cover, Group, etc.).
+		['Mobile', 'Tablet', 'Desktop'].forEach(function (device) {
+			var key = 'responsiveMinHeight' + device;
+			var value = attributes && attributes[key] ? String(attributes[key]).trim() : '';
+			if (!value) return;
+			var deviceSlug = device.toLowerCase();
+			classes.push('has-forwp-min-height-' + deviceSlug);
+			var sanitized = /^-?\d*\.?\d+$/.test(value) ? value + 'px' : value;
+			styles['--forwp-min-height-' + deviceSlug] = sanitized;
+		});
+
 		return {
 			classes: classes,
 			styles: styles
@@ -388,14 +434,33 @@
 			});
 			var activeTabName = ['desktop', 'tablet', 'mobile'].indexOf(deviceState) !== -1 ? deviceState : 'desktop';
 
+			function getCoreSpacing(type, side) {
+				var style = props.attributes.style || {};
+				var spacing = style.spacing || {};
+				var map = spacing[type === 'Padding' ? 'padding' : 'margin'];
+				if (!map || typeof map !== 'object') return '';
+				var key = side.toLowerCase();
+				var val = map[key];
+				return val ? String(val).trim() : '';
+			}
+
 			function renderSpacingGroup(type, deviceKey) {
 				var header = type === 'Padding' ? __('Padding', '4wp-responsive') : __('Margin', '4wp-responsive');
 				var sideKeys = ['Top', 'Right', 'Bottom', 'Left'];
+				function valueFor(side) {
+					var attrKey = 'responsive' + type + side + deviceKey;
+					var ours = props.attributes[attrKey];
+					if (ours !== undefined && ours !== null && String(ours).trim() !== '') {
+						return slugToPresetValue(ours);
+					}
+					var core = getCoreSpacing(type, side);
+					return core ? (core.indexOf('var:') === 0 || core.indexOf('var(') === 0 ? core : core) : '';
+				}
 				var values = {
-					top: slugToPresetValue(props.attributes['responsive' + type + 'Top' + deviceKey]),
-					right: slugToPresetValue(props.attributes['responsive' + type + 'Right' + deviceKey]),
-					bottom: slugToPresetValue(props.attributes['responsive' + type + 'Bottom' + deviceKey]),
-					left: slugToPresetValue(props.attributes['responsive' + type + 'Left' + deviceKey])
+					top: valueFor('Top'),
+					right: valueFor('Right'),
+					bottom: valueFor('Bottom'),
+					left: valueFor('Left')
 				};
 
 				// Step 7.1: Use Gutenberg spacing control when available for native UX.
@@ -416,7 +481,7 @@
 								});
 								props.setAttributes(update);
 							},
-							useSelect: false
+							useSelect: true
 						})
 					);
 				}
@@ -443,6 +508,12 @@
 				);
 			}
 
+			function getCoreFontSize() {
+				var style = props.attributes.style || {};
+				var typo = style.typography || {};
+				return typo.fontSize ? String(typo.fontSize).trim() : '';
+			}
+
 			// Step 7.2: Render font-size controls when supported by the block.
 			function renderFontSizeGroup(deviceKey) {
 				var blockType = window.wp.blocks && window.wp.blocks.getBlockType ? window.wp.blocks.getBlockType(props.name) : null;
@@ -459,7 +530,21 @@
 				}
 
 				var attrKey = 'responsiveFontSize' + deviceKey;
-				var value = fontSlugToPickerValue(props.attributes[attrKey]);
+				var rawValue = props.attributes[attrKey];
+				var coreFontSize = getCoreFontSize();
+				var effectiveRaw = (rawValue !== undefined && rawValue !== null && String(rawValue).trim() !== '') ? String(rawValue).trim() : coreFontSize;
+				var rawSlug = effectiveRaw ? String(effectiveRaw).toLowerCase().replace(/[^a-z0-9_.-]/g, '') : '';
+				var isPreset = rawSlug && fontSlugs.indexOf(rawSlug) !== -1;
+				var value = fontSlugToPickerValue(rawValue || coreFontSize);
+
+				function setFontSize(val) {
+					var update = {};
+					update[attrKey] = val ? String(val).trim() : '';
+					props.setAttributes(update);
+				}
+
+				var customValue = !isPreset && rawValue ? String(rawValue).trim() : '';
+				var customPlaceholder = coreFontSize ? __('Default: %s', '4wp-responsive').replace('%s', coreFontSize) : 'e.g. 18px, 1.2rem';
 
 				return el(
 					'div',
@@ -468,14 +553,20 @@
 						fontSizes: fontSizes,
 						value: value,
 						disableCustomFontSizes: false,
-						fallbackFontSize: undefined,
+						fallbackFontSize: coreFontSize || undefined,
 						onChange: function (nextValue) {
-							var update = {};
-							update[attrKey] = fontPickerValueToSlug(nextValue);
-							props.setAttributes(update);
+							setFontSize(fontPickerValueToSlug(nextValue));
 						}
 					}),
-					el('p', { style: { fontSize: '11px', color: '#757575', margin: '4px 0 0' } }, __('Default comes from theme.json', '4wp-responsive'))
+					TextControl ? el(TextControl, {
+						label: __('Custom size', '4wp-responsive'),
+						value: customValue,
+						placeholder: customPlaceholder,
+						onChange: function (next) {
+							setFontSize(next || '');
+						}
+					}) : null,
+					el('p', { style: { fontSize: '11px', color: '#757575', margin: '4px 0 0' } }, __('Default comes from block / theme.json', '4wp-responsive'))
 				);
 			}
 
@@ -529,6 +620,55 @@
 							props.setAttributes(update);
 						}
 					})
+				);
+			}
+
+			// Step 7.5: Render border radius per corner per device (like default block border radius).
+			function renderBorderRadiusGroup(deviceKey) {
+				var corners = [
+					{ key: 'TopLeft', label: __('Top left', '4wp-responsive') },
+					{ key: 'TopRight', label: __('Top right', '4wp-responsive') },
+					{ key: 'BottomRight', label: __('Bottom right', '4wp-responsive') },
+					{ key: 'BottomLeft', label: __('Bottom left', '4wp-responsive') }
+				];
+				return el(
+					'div',
+					{ className: '4wp-responsive-group' },
+					el('p', { className: '4wp-responsive-group-title' }, __('Border radius', '4wp-responsive')),
+					corners.map(function (c) {
+						var attrKey = 'responsiveBorderRadius' + c.key + deviceKey;
+						var value = (props.attributes[attrKey] || '').trim();
+						return TextControl ? el(TextControl, {
+							key: attrKey,
+							label: c.label,
+							value: value,
+							placeholder: 'e.g. 8px, 0',
+							onChange: function (next) {
+								props.setAttributes({ [attrKey]: (next && next.trim()) || '' });
+							}
+						}) : null;
+					})
+				);
+			}
+
+			// Step 7.6: Render min height per device (only for blocks that support min height, e.g. Cover, Group).
+			function renderMinHeightGroup(deviceKey) {
+				var hasMinHeight = window.wp.blocks && window.wp.blocks.hasBlockSupport && window.wp.blocks.hasBlockSupport(props.name, 'dimensions', 'minHeight');
+				if (!hasMinHeight) return null;
+				var attrKey = 'responsiveMinHeight' + deviceKey;
+				var value = (props.attributes[attrKey] || '').trim();
+				return el(
+					'div',
+					{ className: '4wp-responsive-group' },
+					el('p', { className: '4wp-responsive-group-title' }, __('Min height', '4wp-responsive')),
+					TextControl ? el(TextControl, {
+						label: __('Min height', '4wp-responsive'),
+						value: value,
+						placeholder: 'e.g. 300px, 50vh',
+						onChange: function (next) {
+							props.setAttributes({ [attrKey]: (next && next.trim()) || '' });
+						}
+					}) : null
 				);
 			}
 
@@ -614,6 +754,10 @@
 									renderDivider(),
 									renderReverseOrderGroup(device.key),
 									renderDivider(),
+									renderBorderRadiusGroup(device.key),
+									renderDivider(),
+									renderMinHeightGroup(device.key),
+									renderDivider(),
 									renderVisibilityGroup(device.key)
 								);
 							})
@@ -660,18 +804,43 @@
 			}
 			var className = [props.className, classes.join(' ')].filter(Boolean).join(' ');
 			var inlineAlignStyle = previewAlign ? { textAlign: previewAlign } : {};
+			var classesStr = classes.join(' ');
+			var stylesStr = Object.keys(styles).join(' ');
+			var spacingProps = ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft'];
+			var stripKeys = [];
+			spacingProps.forEach(function (camel) {
+				var css = camel.replace(/([A-Z])/g, '-$1').toLowerCase();
+				if (classesStr.indexOf('has-forwp-' + css + '-') !== -1 || stylesStr.indexOf('--forwp-' + css + '-') !== -1) {
+					stripKeys.push(camel);
+				}
+			});
+			if (classesStr.indexOf('has-forwp-border-radius-') !== -1 || stylesStr.indexOf('--forwp-border-radius-') !== -1) {
+				stripKeys.push('borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius');
+			}
+			if (classesStr.indexOf('has-forwp-min-height-') !== -1 || stylesStr.indexOf('--forwp-min-height-') !== -1) {
+				stripKeys.push('minHeight');
+			}
+			var existingStyle = Object.assign({}, (props.wrapperProps && props.wrapperProps.style) || {}, props.style || {});
+			stripKeys.forEach(function (key) {
+				delete existingStyle[key];
+			});
 			var wrapperProps = Object.assign({}, props.wrapperProps || {}, {
 				style: Object.assign(
 					{},
-					(props.wrapperProps && props.wrapperProps.style) || {},
+					existingStyle,
 					styles,
 					dimForDevice ? { opacity: 0.35 } : {},
 					inlineAlignStyle
 				)
 			});
+			var blockStyle = Object.assign({}, props.style || {});
+			stripKeys.forEach(function (key) {
+				delete blockStyle[key];
+			});
+			Object.assign(blockStyle, inlineAlignStyle);
 			return el(BlockListBlock, Object.assign({}, props, {
 				className: className,
-				style: Object.assign({}, props.style || {}, inlineAlignStyle),
+				style: blockStyle,
 				wrapperProps: wrapperProps
 			}));
 		};
