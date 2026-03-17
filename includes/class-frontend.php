@@ -265,6 +265,34 @@ class Frontend {
 			$styles[]  = '--forwp-min-height-' . $device_slug . ':' . self::sanitize_length_value( $raw_value );
 		}
 
+		// Step 4.5c: Responsive max height (cover, image).
+		foreach ( $devices as $device_key => $device_slug ) {
+			$attr_key = 'responsiveMaxHeight' . $device_key;
+			if ( empty( $attributes[ $attr_key ] ) ) {
+				continue;
+			}
+			$raw_value = trim( (string) $attributes[ $attr_key ] );
+			if ( '' === $raw_value ) {
+				continue;
+			}
+			$classes[] = 'has-forwp-max-height-' . $device_slug;
+			$styles[]  = '--forwp-max-height-' . $device_slug . ':' . self::sanitize_length_value( $raw_value );
+		}
+
+		// Step 4.5d: Responsive line-height (headings, paragraph, blocks with typography).
+		foreach ( $devices as $device_key => $device_slug ) {
+			$attr_key = 'responsiveLineHeight' . $device_key;
+			if ( empty( $attributes[ $attr_key ] ) ) {
+				continue;
+			}
+			$raw_value = trim( (string) $attributes[ $attr_key ] );
+			if ( '' === $raw_value ) {
+				continue;
+			}
+			$classes[] = 'has-forwp-line-height-' . $device_slug . '-custom';
+			$styles[]  = '--forwp-line-height-' . $device_slug . ':' . self::sanitize_line_height_value( $raw_value );
+		}
+
 		return [
 			'classes' => $classes,
 			'styles'  => $styles,
@@ -272,29 +300,25 @@ class Frontend {
 	}
 
 	/**
-	 * Remove padding/margin from inline style when we override them via responsive classes/vars,
-	 * so default block padding (e.g. 160px) does not stay in the attribute and override our rules.
+	 * Remove from inline style only properties that we fully control per viewport via CSS vars.
+	 * Do NOT strip padding/margin: block default (desktop) stays in inline style; our responsive
+	 * rules override only in the matching media query, so desktop values are preserved.
 	 *
 	 * @param string $existing_style Inline style string.
 	 * @param array  $result        Result from get_responsive_classes_and_styles (classes, styles).
 	 * @return string Filtered style string.
 	 */
 	private static function strip_responsive_overridden_properties( $existing_style, $result ) {
-		$classes = isset( $result['classes'] ) ? implode( ' ', $result['classes'] ) : '';
-		$styles  = isset( $result['styles'] ) ? implode( ' ', $result['styles'] ) : '';
-		$props    = [ 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left' ];
-		if ( strpos( $classes, 'has-forwp-min-height-' ) !== false || strpos( $styles, '--forwp-min-height-' ) !== false ) {
-			$props[] = 'min-height';
+		$classes   = isset( $result['classes'] ) ? implode( ' ', $result['classes'] ) : '';
+		$styles    = isset( $result['styles'] ) ? implode( ' ', $result['styles'] ) : '';
+		$to_strip  = [];
+		$props     = [];
+		// Do not strip min-height/max-height: core value stays in inline for desktop; responsive overrides only in media queries.
+		if ( strpos( $classes, 'has-forwp-line-height-' ) !== false || strpos( $styles, '--forwp-line-height-' ) !== false ) {
+			$props[] = 'line-height';
 		}
-		$to_strip = [];
 		foreach ( $props as $prop ) {
-			if ( strpos( $classes, 'has-forwp-' . $prop . '-' ) !== false ) {
-				$to_strip[] = $prop;
-				continue;
-			}
-			if ( strpos( $styles, '--forwp-' . $prop . '-' ) !== false ) {
-				$to_strip[] = $prop;
-			}
+			$to_strip[] = $prop;
 		}
 		// Strip per-corner border radius when we have any responsive border radius override.
 		if ( strpos( $classes, 'has-forwp-border-radius-' ) !== false || strpos( $styles, '--forwp-border-radius-' ) !== false ) {
@@ -360,6 +384,26 @@ class Frontend {
 	 */
 	private static function sanitize_length_value( $value ) {
 		return self::sanitize_custom_value( $value );
+	}
+
+	/**
+	 * Sanitize line-height value (unitless or with unit: px, em, rem, %).
+	 *
+	 * @param string $value Raw value.
+	 * @return string
+	 */
+	private static function sanitize_line_height_value( $value ) {
+		$value = trim( $value );
+		if ( '' === $value ) {
+			return '';
+		}
+		if ( is_numeric( $value ) ) {
+			return $value;
+		}
+		if ( preg_match( '/^-?\d*\.?\d+(px|%|em|rem)?$/i', $value ) ) {
+			return $value;
+		}
+		return '';
 	}
 }
 

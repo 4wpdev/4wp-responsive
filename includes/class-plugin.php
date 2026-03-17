@@ -126,6 +126,22 @@ class Plugin {
 			];
 		}
 
+		// Step 2.7: Generate attribute definitions for responsive max height (cover/image).
+		foreach ( self::get_max_height_attribute_keys() as $attribute_key ) {
+			$args['attributes'][ $attribute_key ] = [
+				'type'    => 'string',
+				'default' => '',
+			];
+		}
+
+		// Step 2.8: Generate attribute definitions for responsive line-height.
+		foreach ( self::get_line_height_attribute_keys() as $attribute_key ) {
+			$args['attributes'][ $attribute_key ] = [
+				'type'    => 'string',
+				'default' => '',
+			];
+		}
+
 		return $args;
 	}
 
@@ -231,6 +247,34 @@ class Plugin {
 		$keys    = [];
 		foreach ( $devices as $device ) {
 			$keys[] = 'responsiveMinHeight' . $device;
+		}
+		return $keys;
+	}
+
+	/**
+	 * Step 3.7: Build the list of responsive max height attribute keys (cover/image).
+	 *
+	 * @return string[]
+	 */
+	public static function get_max_height_attribute_keys() {
+		$devices = [ 'Mobile', 'Tablet', 'Desktop' ];
+		$keys    = [];
+		foreach ( $devices as $device ) {
+			$keys[] = 'responsiveMaxHeight' . $device;
+		}
+		return $keys;
+	}
+
+	/**
+	 * Step 3.8: Build the list of responsive line-height attribute keys.
+	 *
+	 * @return string[]
+	 */
+	public static function get_line_height_attribute_keys() {
+		$devices = [ 'Mobile', 'Tablet', 'Desktop' ];
+		$keys    = [];
+		foreach ( $devices as $device ) {
+			$keys[] = 'responsiveLineHeight' . $device;
 		}
 		return $keys;
 	}
@@ -520,7 +564,7 @@ class Plugin {
 			'fontFallback'  => self::uses_fallback_font_sizes(),
 			'prefix'        => 'forwp',
 			'cssVersion'    => defined( 'FORWP_RESPONSIVE_VERSION' ) ? FORWP_RESPONSIVE_VERSION : 'dev',
-			'cssTemplate'   => 16, // Bump when typography/spacing/layout logic changes to force regeneration.
+			'cssTemplate'   => 20, // Bump to force CSS regen after removing min-height unset rule.
 		];
 		$hash      = md5( wp_json_encode( $hash_data ) );
 		$filename  = 'forwp-responsive-' . $hash . '.css';
@@ -588,6 +632,7 @@ class Plugin {
 			$css .= self::build_spacing_rules( $device, $normalized_sizes );
 			$css .= self::build_border_radius_rules_for_device( $device );
 			$css .= self::build_min_height_rules_for_device( $device );
+			$css .= self::build_max_height_rules_for_device( $device );
 			$css .= "}\n\n";
 		}
 
@@ -608,6 +653,9 @@ class Plugin {
 
 		// Step 8.6: Append text alignment utilities for front and editor preview.
 		$css .= self::build_text_align_rules( $breakpoints );
+
+		// Step 8.7: Append line-height utilities per device.
+		$css .= self::build_line_height_rules( $breakpoints );
 
 		return $css;
 	}
@@ -919,6 +967,7 @@ class Plugin {
 
 	/**
 	 * Step 9.3.1: Build typography rules for editor preview classes (no media query).
+	 * Editor-only: use body.wp-admin so these rules never apply on the frontend (avoids mobile font-size overriding desktop).
 	 *
 	 * @param array $font_sizes Font size presets.
 	 * @return string
@@ -929,10 +978,14 @@ class Plugin {
 
 		foreach ( $devices as $device ) {
 			$preview_prefixes = self::get_preview_prefixes( $device );
+			// Restrict to editor only so frontend never gets mobile/tablet font-size without media query.
+			$editor_prefixes = array_map( function ( $p ) {
+				return 'body.wp-admin ' . ltrim( $p );
+			}, $preview_prefixes );
 
 			// Custom value selector ( !important so it overrides block inline font-size and theme rules ).
 			$selector  = '.has-forwp-font-size-' . $device . '-custom';
-			$selectors = self::prefix_selectors( $selector, $preview_prefixes );
+			$selectors = self::prefix_selectors( $selector, $editor_prefixes );
 			$css      .= implode( ',', $selectors ) . '{ font-size:var(--forwp-font-size-' . $device . ') !important; }' . "\n";
 
 			foreach ( $font_sizes as $size ) {
@@ -941,7 +994,7 @@ class Plugin {
 				}
 				$slug      = $size['slug'];
 				$selector  = '.has-forwp-font-size-' . $device . '-' . $slug;
-				$selectors = self::prefix_selectors( $selector, $preview_prefixes );
+				$selectors = self::prefix_selectors( $selector, $editor_prefixes );
 				$css      .= implode( ',', $selectors ) . '{ font-size:var(--wp--preset--font-size--' . $slug . ') !important; }' . "\n";
 			}
 		}
@@ -980,6 +1033,53 @@ class Plugin {
 	private static function build_min_height_rules_for_device( $device ) {
 		$class = 'has-forwp-min-height-' . $device;
 		return '/* Min height */' . "\n." . $class . '{ min-height: var(--forwp-min-height-' . $device . ') !important; }' . "\n";
+	}
+
+	/**
+	 * Step 9.5c: Build max height rules for a single device (cover/image).
+	 *
+	 * @param string $device Device key (mobile, tablet, desktop).
+	 * @return string
+	 */
+	private static function build_max_height_rules_for_device( $device ) {
+		$class = 'has-forwp-max-height-' . $device;
+		return '/* Max height */' . "\n." . $class . '{ max-height: var(--forwp-max-height-' . $device . ') !important; }' . "\n";
+	}
+
+	/**
+	 * Step 9.5d: Build line-height rules per breakpoint and editor preview.
+	 *
+	 * @param array $breakpoints Breakpoint settings.
+	 * @return string
+	 */
+	private static function build_line_height_rules( $breakpoints ) {
+		$mobile_max  = absint( $breakpoints['mobile']['max'] ?? 599 );
+		$tablet_min  = absint( $breakpoints['tablet']['min'] ?? 600 );
+		$tablet_max  = absint( $breakpoints['tablet']['max'] ?? 1023 );
+		$desktop_min = absint( $breakpoints['desktop']['min'] ?? 1024 );
+
+		$media_queries = [
+			'mobile'  => '(max-width: ' . $mobile_max . 'px)',
+			'tablet'  => '(min-width: ' . $tablet_min . 'px) and (max-width: ' . $tablet_max . 'px)',
+			'desktop' => '(min-width: ' . $desktop_min . 'px)',
+		];
+
+		$css = "/* Line-height utilities */\n";
+		foreach ( $media_queries as $device => $query ) {
+			$preview_prefixes = self::get_preview_prefixes( $device );
+			$selector = '.has-forwp-line-height-' . $device . '-custom';
+			$selectors = array_merge( [ $selector ], self::prefix_selectors( $selector, $preview_prefixes ) );
+			$css .= '@media ' . $query . " {\n";
+			$css .= implode( ',', $selectors ) . '{ line-height: var(--forwp-line-height-' . $device . ') !important; }' . "\n";
+			$css .= "}\n";
+		}
+		foreach ( [ 'mobile', 'tablet', 'desktop' ] as $device ) {
+			$preview_prefixes = self::get_preview_prefixes( $device );
+			$selector = '.has-forwp-line-height-' . $device . '-custom';
+			$selectors = self::prefix_selectors( $selector, $preview_prefixes );
+			$css .= implode( ',', $selectors ) . '{ line-height: var(--forwp-line-height-' . $device . ') !important; }' . "\n";
+		}
+		return $css;
 	}
 
 	/**

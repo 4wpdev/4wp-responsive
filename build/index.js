@@ -30,6 +30,10 @@
 	var ToggleControl = window.wp.components.ToggleControl;
 	var ButtonGroup = window.wp.components.ButtonGroup;
 	var Button = window.wp.components.Button;
+	var DropdownMenu = window.wp.components.DropdownMenu;
+	var MenuGroup = window.wp.components.MenuGroup;
+	var MenuItemsChoice = window.wp.components.MenuItemsChoice;
+	var Icon = window.wp.components.Icon;
 	var select = window.wp.data.select;
 	var subscribe = window.wp.data.subscribe;
 
@@ -50,6 +54,18 @@
 		{ key: 'Desktop', slug: 'desktop', label: __('Desktop', '4wp-responsive') },
 		{ key: 'Tablet', slug: 'tablet', label: __('Tablet', '4wp-responsive') },
 		{ key: 'Mobile', slug: 'mobile', label: __('Mobile', '4wp-responsive') }
+	];
+
+	// Device icons (same as core View dropdown: desktop, tablet, mobile).
+	var deviceIcons = {
+		desktop: { path: el('path', { d: 'M20.5 16h-.7V8c0-1.1-.9-2-2-2H6.2c-1.1 0-2 .9-2 2v8h-.7c-.8 0-1.5.7-1.5 1.5h20c0-.8-.7-1.5-1.5-1.5zM5.7 8c0-.3.2-.5.5-.5h11.6c.3 0 .5.2.5.5v7.6H5.7V8z' }) },
+		tablet: { path: el('path', { d: 'M17 4H7c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm.5 14c0 .3-.2.5-.5.5H7c-.3 0-.5-.2-.5-.5V6c0-.3.2-.5.5-.5h10c.3 0 .5.2.5.5v12zm-7.5-.5h4V16h-4v1.5z' }) },
+		mobile: { path: el('path', { d: 'M15 4H9c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm.5 14c0 .3-.2.5-.5.5H9c-.3 0-.5-.2-.5-.5V6c0-.3.2-.5.5-.5h6c.3 0 .5.2.5.5v12zm-4.5-.5h2V16h-2v1.5z' }) }
+	};
+	var deviceChoices = [
+		{ value: 'Desktop', label: __('Desktop', '4wp-responsive'), icon: deviceIcons.desktop },
+		{ value: 'Tablet', label: __('Tablet', '4wp-responsive'), icon: deviceIcons.tablet },
+		{ value: 'Mobile', label: __('Mobile', '4wp-responsive'), icon: deviceIcons.mobile }
 	];
 
 	// Step 4: Build dropdown options from spacing presets.
@@ -161,6 +177,28 @@
 		return (device || 'Desktop').toLowerCase();
 	}
 
+	// Step 4.4.2: Sync body class forwp-preview-{device} so CSS can gray only blocks hidden on current device.
+	function applyPreviewDeviceClassToBody(device) {
+		var c = 'forwp-preview-' + (device || 'desktop');
+		var all = ['forwp-preview-mobile', 'forwp-preview-tablet', 'forwp-preview-desktop'];
+		function updateBody(body) {
+			if (!body || !body.classList) return;
+			all.forEach(function (cls) { body.classList.remove(cls); });
+			body.classList.add(c);
+		}
+		updateBody(typeof document !== 'undefined' && document.body);
+		var iframe = typeof document !== 'undefined' && document.querySelector && document.querySelector('iframe[name="editor-canvas"]');
+		if (iframe && iframe.contentDocument && iframe.contentDocument.body) {
+			updateBody(iframe.contentDocument.body);
+		}
+	}
+	if (subscribe) {
+		applyPreviewDeviceClassToBody(getPreviewDeviceType());
+		subscribe(function () {
+			applyPreviewDeviceClassToBody(getPreviewDeviceType());
+		});
+	}
+
 	// Step 4.5: Render a simple divider line for section separation.
 	function renderDivider() {
 		return el('div', {
@@ -229,6 +267,14 @@
 			var mhKey = 'responsiveMinHeight' + device;
 			if (!settings.attributes[mhKey]) {
 				settings.attributes[mhKey] = { type: 'string', default: '' };
+			}
+			var maxHKey = 'responsiveMaxHeight' + device;
+			if (!settings.attributes[maxHKey]) {
+				settings.attributes[maxHKey] = { type: 'string', default: '' };
+			}
+			var lhKey = 'responsiveLineHeight' + device;
+			if (!settings.attributes[lhKey]) {
+				settings.attributes[lhKey] = { type: 'string', default: '' };
 			}
 		});
 
@@ -370,6 +416,27 @@
 			styles['--forwp-min-height-' + deviceSlug] = sanitized;
 		});
 
+		// Step 6.7: Responsive max height (cover, image).
+		['Mobile', 'Tablet', 'Desktop'].forEach(function (device) {
+			var key = 'responsiveMaxHeight' + device;
+			var value = attributes && attributes[key] ? String(attributes[key]).trim() : '';
+			if (!value) return;
+			var deviceSlug = device.toLowerCase();
+			classes.push('has-forwp-max-height-' + deviceSlug);
+			var sanitized = /^-?\d*\.?\d+$/.test(value) ? value + 'px' : value;
+			styles['--forwp-max-height-' + deviceSlug] = sanitized;
+		});
+
+		// Step 6.8: Responsive line-height.
+		['Mobile', 'Tablet', 'Desktop'].forEach(function (device) {
+			var key = 'responsiveLineHeight' + device;
+			var value = attributes && attributes[key] ? String(attributes[key]).trim() : '';
+			if (!value) return;
+			var deviceSlug = device.toLowerCase();
+			classes.push('has-forwp-line-height-' + deviceSlug + '-custom');
+			styles['--forwp-line-height-' + deviceSlug] = value;
+		});
+
 		return {
 			classes: classes,
 			styles: styles
@@ -408,9 +475,17 @@
 				return el(BlockEdit, props);
 			}
 
-			var activeDevice = useState(getPreviewDeviceType());
+			var initialDevice = getPreviewDeviceType();
+			var initialCap = initialDevice === 'mobile' ? 'Mobile' : initialDevice === 'tablet' ? 'Tablet' : 'Desktop';
+			var activeDevice = useState(initialDevice);
 			var deviceState = activeDevice[0];
 			var setDeviceState = activeDevice[1];
+			var lineHeightPanelDeviceState = useState(initialCap);
+			var lineHeightPanelDevice = lineHeightPanelDeviceState[0];
+			var setLineHeightPanelDevice = lineHeightPanelDeviceState[1];
+			var safeDevice = (lineHeightPanelDevice === 'Tablet' || lineHeightPanelDevice === 'Mobile') ? lineHeightPanelDevice : 'Desktop';
+			var editorDeviceCap = deviceState === 'mobile' ? 'Mobile' : deviceState === 'tablet' ? 'Tablet' : 'Desktop';
+			var isSyncedWithEditor = safeDevice === editorDeviceCap;
 
 			useEffect(function () {
 				var updateDevice = function () {
@@ -418,6 +493,8 @@
 					setDeviceState(function (current) {
 						return current === nextDevice ? current : nextDevice;
 					});
+					var capDevice = nextDevice === 'mobile' ? 'Mobile' : nextDevice === 'tablet' ? 'Tablet' : 'Desktop';
+					setLineHeightPanelDevice(capDevice);
 				};
 
 				updateDevice();
@@ -651,10 +728,19 @@
 				);
 			}
 
-			// Step 7.6: Render min height per device (only for blocks that support min height, e.g. Cover, Group).
+			// Blocks where min-height makes sense (containers). Paragraph/Heading get huge empty space.
+			var minHeightBlockWhitelist = ['core/cover', 'core/group', 'core/columns', 'core/column'];
+			function blockAllowsMinHeight() {
+				var hasSupport = window.wp.blocks && window.wp.blocks.hasBlockSupport && window.wp.blocks.hasBlockSupport(props.name, 'dimensions', 'minHeight');
+				if (!hasSupport) return false;
+				if (minHeightBlockWhitelist.indexOf(props.name) !== -1) return true;
+				var hasValue = props.attributes && (props.attributes.responsiveMinHeightMobile || props.attributes.responsiveMinHeightTablet || props.attributes.responsiveMinHeightDesktop);
+				return !!hasValue;
+			}
+
+			// Step 7.6: Render min height per device (only for containers; or any block that already has a value so user can clear).
 			function renderMinHeightGroup(deviceKey) {
-				var hasMinHeight = window.wp.blocks && window.wp.blocks.hasBlockSupport && window.wp.blocks.hasBlockSupport(props.name, 'dimensions', 'minHeight');
-				if (!hasMinHeight) return null;
+				if (!blockAllowsMinHeight()) return null;
 				var attrKey = 'responsiveMinHeight' + deviceKey;
 				var value = (props.attributes[attrKey] || '').trim();
 				return el(
@@ -665,6 +751,37 @@
 						label: __('Min height', '4wp-responsive'),
 						value: value,
 						placeholder: 'e.g. 300px, 50vh',
+						onChange: function (next) {
+							props.setAttributes({ [attrKey]: (next && next.trim()) || '' });
+						}
+					}) : null
+				);
+			}
+
+			// Max height: same whitelist as min-height + core/image.
+			function blockAllowsMaxHeight() {
+				if (props.name === 'core/image') return true;
+				var hasSupport = window.wp.blocks && window.wp.blocks.hasBlockSupport && window.wp.blocks.hasBlockSupport(props.name, 'dimensions', 'minHeight');
+				if (!hasSupport) return false;
+				var whitelist = ['core/cover', 'core/group', 'core/columns', 'core/column'];
+				if (whitelist.indexOf(props.name) !== -1) return true;
+				var hasValue = props.attributes && (props.attributes.responsiveMaxHeightMobile || props.attributes.responsiveMaxHeightTablet || props.attributes.responsiveMaxHeightDesktop);
+				return !!hasValue;
+			}
+
+			// Step 7.6b: Render max height per device (Cover, Image, Group, etc.).
+			function renderMaxHeightGroup(deviceKey) {
+				if (!blockAllowsMaxHeight()) return null;
+				var attrKey = 'responsiveMaxHeight' + deviceKey;
+				var value = (props.attributes[attrKey] || '').trim();
+				return el(
+					'div',
+					{ className: '4wp-responsive-group' },
+					el('p', { className: '4wp-responsive-group-title' }, __('Max height', '4wp-responsive')),
+					TextControl ? el(TextControl, {
+						label: __('Max height', '4wp-responsive'),
+						value: value,
+						placeholder: 'e.g. 400px, 80vh',
 						onChange: function (next) {
 							props.setAttributes({ [attrKey]: (next && next.trim()) || '' });
 						}
@@ -714,10 +831,66 @@
 				);
 			}
 
+			var hasLineHeightSupport = window.wp.blocks && window.wp.blocks.hasBlockSupport && window.wp.blocks.hasBlockSupport(props.name, 'typography', 'lineHeight');
+
 			return el(
 				Fragment,
 				null,
 				el(BlockEdit, props),
+				hasLineHeightSupport ? el(
+					InspectorControls,
+					{ group: 'typography' },
+					el('div', {
+						className: 'forwp-typography-line-height-wrapper' + (isSyncedWithEditor ? ' forwp-lh-synced-with-editor' : ''),
+						style: { gridColumn: '1 / -1', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e0e0e0' }
+					},
+						el('p', { style: { marginBottom: '8px', fontSize: '12px', fontWeight: '600' } }, __('Line height (by device)', '4wp-responsive')),
+						DropdownMenu && MenuGroup && MenuItemsChoice ? el(DropdownMenu, {
+							label: safeDevice === 'Desktop' ? __('Desktop', '4wp-responsive') : safeDevice === 'Tablet' ? __('Tablet', '4wp-responsive') : __('Mobile', '4wp-responsive'),
+							className: 'forwp-line-height-device-dropdown',
+							popoverProps: { placement: 'bottom-start' },
+							toggleProps: { size: 'compact' },
+							children: function (renderProps) {
+								var onClose = (renderProps && typeof renderProps.onClose === 'function') ? renderProps.onClose : function () {};
+								return el(MenuGroup, { key: 'forwp-lh-device' }, el(MenuItemsChoice, {
+									choices: [{ value: 'Desktop', label: __('Desktop', '4wp-responsive') }, { value: 'Tablet', label: __('Tablet', '4wp-responsive') }, { value: 'Mobile', label: __('Mobile', '4wp-responsive') }],
+									value: safeDevice,
+									onSelect: function (val) {
+										setLineHeightPanelDevice(val === 'Tablet' || val === 'Mobile' ? val : 'Desktop');
+										onClose();
+									}
+								}));
+							}
+						}) : el(ButtonGroup, { style: { marginBottom: '12px' } },
+							deviceChoices.map(function (c) {
+								return el(Button, {
+									key: c.value,
+									isPrimary: safeDevice === c.value,
+									isSecondary: safeDevice !== c.value,
+									isSmall: true,
+									onClick: function () { setLineHeightPanelDevice(c.value); }
+								}, c.label);
+							})
+						),
+						safeDevice === 'Desktop' ? (function () {
+							var style = props.attributes && props.attributes.style;
+							var coreLh = style && style.typography && style.typography.lineHeight;
+							return el('p', { style: { fontSize: '12px', color: '#757575', margin: '8px 0 0' } }, __('Uses the Line height from the control above.', '4wp-responsive'), coreLh != null && coreLh !== '' ? el('span', { style: { display: 'block', marginTop: '4px', fontWeight: '500', color: '#1e1e1e' } }, String(coreLh)) : null);
+						})() : null,
+						safeDevice === 'Tablet' ? (TextControl ? el(TextControl, {
+							label: __('Line height (Tablet)', '4wp-responsive'),
+							value: ((props.attributes && props.attributes.responsiveLineHeightTablet) || '').trim(),
+							placeholder: (props.attributes && props.attributes.style && props.attributes.style.typography && props.attributes.style.typography.lineHeight) ? String(props.attributes.style.typography.lineHeight) : 'e.g. 1.5, 24px',
+							onChange: function (next) { props.setAttributes({ responsiveLineHeightTablet: (next && next.trim()) || '' }); }
+						}) : null) : null,
+						safeDevice === 'Mobile' ? (TextControl ? el(TextControl, {
+							label: __('Line height (Mobile)', '4wp-responsive'),
+							value: ((props.attributes && props.attributes.responsiveLineHeightMobile) || '').trim(),
+							placeholder: (props.attributes && props.attributes.style && props.attributes.style.typography && props.attributes.style.typography.lineHeight) ? String(props.attributes.style.typography.lineHeight) : 'e.g. 1.5, 24px',
+							onChange: function (next) { props.setAttributes({ responsiveLineHeightMobile: (next && next.trim()) || '' }); }
+						}) : null) : null
+					)
+				) : null,
 				el(
 					InspectorControls,
 					null,
@@ -757,6 +930,8 @@
 									renderBorderRadiusGroup(device.key),
 									renderDivider(),
 									renderMinHeightGroup(device.key),
+									renderDivider(),
+									renderMaxHeightGroup(device.key),
 									renderDivider(),
 									renderVisibilityGroup(device.key)
 								);
@@ -799,26 +974,27 @@
 				}
 			}
 
-			if (!classes.length && !Object.keys(styles).length && !dimForDevice) {
+			var hasVisibilityRestriction = !!(props.attributes && (
+				props.attributes.responsiveHideMobile || props.attributes.responsiveHideTablet || props.attributes.responsiveHideDesktop ||
+				props.attributes.responsiveShowMobile || props.attributes.responsiveShowTablet || props.attributes.responsiveShowDesktop
+			));
+			var badgeClass = hasVisibilityRestriction ? ' forwp-has-visibility-badge' : '';
+
+			if (!classes.length && !Object.keys(styles).length && !dimForDevice && !badgeClass) {
 				return el(BlockListBlock, props);
 			}
-			var className = [props.className, classes.join(' ')].filter(Boolean).join(' ');
+			var className = [props.className, classes.join(' '), badgeClass.trim()].filter(Boolean).join(' ');
 			var inlineAlignStyle = previewAlign ? { textAlign: previewAlign } : {};
 			var classesStr = classes.join(' ');
 			var stylesStr = Object.keys(styles).join(' ');
-			var spacingProps = ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft'];
 			var stripKeys = [];
-			spacingProps.forEach(function (camel) {
-				var css = camel.replace(/([A-Z])/g, '-$1').toLowerCase();
-				if (classesStr.indexOf('has-forwp-' + css + '-') !== -1 || stylesStr.indexOf('--forwp-' + css + '-') !== -1) {
-					stripKeys.push(camel);
-				}
-			});
+			// Do not strip padding/margin: keep block default (desktop) so mobile-only values don't clear it.
 			if (classesStr.indexOf('has-forwp-border-radius-') !== -1 || stylesStr.indexOf('--forwp-border-radius-') !== -1) {
 				stripKeys.push('borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius');
 			}
-			if (classesStr.indexOf('has-forwp-min-height-') !== -1 || stylesStr.indexOf('--forwp-min-height-') !== -1) {
-				stripKeys.push('minHeight');
+			// Do not strip minHeight/maxHeight: core value stays for desktop; responsive overrides only in media/preview.
+			if (classesStr.indexOf('has-forwp-line-height-') !== -1 || stylesStr.indexOf('--forwp-line-height-') !== -1) {
+				stripKeys.push('lineHeight');
 			}
 			var existingStyle = Object.assign({}, (props.wrapperProps && props.wrapperProps.style) || {}, props.style || {});
 			stripKeys.forEach(function (key) {
